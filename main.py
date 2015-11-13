@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-### modules ###
+# modules
 import os
 import re
 import sys
@@ -9,15 +9,15 @@ import time
 import random
 import argparse
 import urllib.request
+import xml.sax.saxutils
 
+# mymodule
+script_path = os.path.basename(__file__)
+sys.path.append(script_path)
+import agent
 
 # global variables
-agent_list_path = "./user-agent.txt"
-if not os.path.exists(agent_list_path):
-    print("User-agent list is not found.")
-    os.exit(1)
-f = open("user-agent.txt", "r")
-user_agent = random.choice(f.readlines())
+user_agent = random.choice(agent.agent_list)
 
 
 # functions
@@ -25,25 +25,29 @@ def save_image(img_url, img_path):
     global user_agent
 
     try:
-        req = urllib.request.Request(
-            img_url,
-            data=None,
-            headers={
-                'User-Agent': user_agent
-            }
-        )
+        for _ in range(5):
+            req = urllib.request.Request(
+                img_url,
+                data=None,
+                headers={
+                    'User-Agent': user_agent
+                }
+            )
 
-        with urllib.request.urlopen(req) as img:
-            localfile = open(img_path, 'wb')
-            localfile.write(img.read())
-            img.close()
-            localfile.close()
+            with urllib.request.urlopen(req) as img:
+                localfile = open(img_path, 'wb')
+                localfile.write(img.read())
+                img.close()
+                localfile.close()
 
-        return True
+            return True
 
     except:
-        print("Error : Image download error.")
-        return False
+        time.sleep(1)
+        pass
+
+    print("Error: Image download error.")
+    return False
 
 
 def get_html(url):
@@ -67,21 +71,23 @@ def get_html(url):
 
 def ehentai_get_gurl(url):
     html = ""
+
     try:
-        for _ in range(10):
+        for _ in range(5):
             html = get_html(url)
             break
     except:
+        time.sleep(1)
         pass
 
     m1 = re.search("http://g.e-hentai.org/g/.*", url)
-    if m1 != None:
+    if not m1 is None:
         return url
 
     m2 = re.search("http://g.e-hentai.org/s/.*", url)
-    if m2 != None:
+    if not m2 is None:
         m2_g = re.search("<div class=\"sb\"><a href=\"(.*?)\">", html)
-        if m2_g != None:
+        if not m2_g is None:
             return m2_g.group(1)
 
     return ""
@@ -89,23 +95,27 @@ def ehentai_get_gurl(url):
 
 def ehentai_get_topurl(url):
     html = ""
+
     try:
-        for _ in range(10):
+        for _ in range(5):
             html = get_html(url)
             break
     except:
+        time.sleep(1)
         pass
 
     m1 = re.search("http://g.e-hentai.org/g/.*", url)
-    if m1 != None:
-        m1_top = re.search("<div style=\".*?\"><a href=\"(.*)?\"><img alt=\"0*1\"", html)
-        if m1_top != None:
+    if not m1 is None:
+        pat1 = "<div style=\".*?\"><a href=\"(.*)?\"><img alt=\"0*1\""
+        m1_top = re.search(pat1, html)
+        if not m1_top is None:
             return m1_top.group(1)
 
     m2 = re.search("http://g.e-hentai.org/s/.*", url)
-    if m2 != None:
-        m2_top = re.search("<div class=\"sn\"><a onclick=\".*?\" href=\"(.*?)\">", html)
-        if m2_top != None:
+    if not m2 is None:
+        pat2 = "<div class=\"sn\"><a onclick=\".*?\" href=\"(.*?)\">"
+        m2_top = re.search(pat2, html)
+        if not m2_top is None:
             return m2_top.group(1)
 
     return ""
@@ -113,20 +123,38 @@ def ehentai_get_topurl(url):
 
 def ehentai_get_title(top_url):
     html = ""
+    entities = {
+        "&#039;": "'",
+        "&quot;": '"'
+    }
+
     try:
-        for _ in range(10):
+        for _ in range(5):
             html = get_html(top_url)
             break
     except:
+        time.sleep(1)
         pass
 
-    m1 = re.search("<h1 id=\"gj\">(.*?)</h1>", html)
-    if m1 != None:
-        return m1.group(1)
+    #print(html)
 
-    m2 = re.search("<h1 id=\"gn\">(.*?)</h1>", html)
-    if m2 != None:
-        return m2.group(1)
+    m1 = re.search("<h1 id=\"gj\">(.+?)</h1>", html)
+    if not m1 is None:
+        tmp = m1.group(1)
+        title = xml.sax.saxutils.unescape(tmp, entities)
+        return title
+
+    m2 = re.search("<h1 id=\"gn\">(.+?)</h1>", html)
+    if not m2 is None:
+        tmp = m2.group(1)
+        title = xml.sax.saxutils.unescape(tmp, entities)
+        return title
+
+    m3 = re.serach("<title>(.+?)</title>", html)
+    if not m3 is None:
+        tmp = m3.group(1)
+        title = xml.sax.saxutils.unescape(tmp, entities)
+        return title
 
     return "Unknown"
 
@@ -134,15 +162,18 @@ def ehentai_get_title(top_url):
 def ehentai_get_numimgs(top_url):
     num = 0
     html = ""
+
     try:
-        for _ in range(10):
+        for _ in range(5):
             html = get_html(top_url)
             break
     except:
+        time.sleep(1)
         pass
 
-    m = re.search("<div><span>1</span> / <span>(.*?)</span></div>", html)
-    if m != None:
+    pat = "<div><span>1</span> / <span>(.*?)</span></div>"
+    m = re.search(pat, html)
+    if not m is None:
         num = int(m.group(1))
 
     return num
@@ -153,8 +184,9 @@ def ehentai_get_imginfo(html):
     img_size = 0
     img_byte_size = 0
 
-    m = re.search("<img src=\".*?\" /></a></div><div>(.*?) :: .*? :: (.*?)([KMGT]?B)</div>", html)
-    if m != None:
+    pat = "<img src=\".*?\" /></a></div><div>(.*?) :: .*? :: (.*?)([KMGT]?B)</div>"
+    m = re.search(pat, html)
+    if not m is None:
         img_name = m.group(1)
         img_size = float(m.group(2).strip())
         img_bpref = m.group(3)
@@ -178,12 +210,12 @@ def get_input_urls(input_str, flag_urlonly=False):
             return [input_str]
 
         m2 = re.search(pat2, input_str)
-        if m2 != None:
+        if not m2 is None:
             print("HTTPS access is not permitted in E-Hentai Gallery.")
             print("Please input url starts with \"http://\".")
             sys.exit(1)
 
-        print("Error : URL is invalid.\n")
+        print("Error: URL is invalid.\n")
         sys.exit(1)
     else:
         urls = []
@@ -200,7 +232,7 @@ def get_input_urls(input_str, flag_urlonly=False):
 
             return urls
         else:
-            print("Error : Input file of urls is not found.\n")
+            print("Error: Input file of urls is not found.\n")
             sys.exit(1)
 
     return []
@@ -215,8 +247,9 @@ def check_file_corruption(img_size, img_path):
 
 
 def ehentai_get_nexturl(html):
-    m_next = re.search("<a id=\"next\" onclick=\".*?\" href=\"(.*?)\">", html)
-    if m_next != None:
+    pat = "<a id=\"next\" onclick=\".*?\" href=\"(.*?)\">"
+    m_next = re.search(pat, html)
+    if not m_next is None:
         next_url = m_next.group(1)
         return next_url
 
@@ -234,40 +267,55 @@ def create_report(page_info):
 def ehentai_download(save_path, page_info):
     # variables
     count = 0
-    count_stop = 0
+    count_retry = 0
+    interval = 0
+
     url        = page_info["top_url"]
-    num_images = page_info["num_images"]
+    args       = page_info["args"]
     flags      = page_info["flags"]
+    num_images = page_info["num_images"]
 
     if page_info["tmp_count"] > 0:
         url   = page_info["tmp_url"]
         count = page_info["tmp_count"]
 
+    if not args.interval is None:
+        interval = args.interval[0]
+    else:
+        if num_images <= 50:
+            interval = 1
+        else:
+            interval = 1 + (num_images-50)/200
+            if interval > 5: interval = 5
+
     # download operation
     while count < num_images:
 
-        if count_stop < 20:
-            count_stop = 0
+        # count of retry
+        if count_retry < 10:
+            count_retry = 0
         else:
             break
 
         # get html
         try:
             html = get_html(url)
-            time.sleep(1)
+            time.sleep(interval)
         except:
-            print("Error : HTML document download error.")
-            count_stop += 1
+            print("Error: HTML document download error.")
+            count_retry += 1
             continue
 
         if html == "":
-            count_stop += 1
+            count_retry += 1
             continue
 
         m_img = re.search("<img id=\"img\" src=\"(.*?)\" style=\".*?\" />", html)
 
-        if m_img != None:
+        if not m_img is None:
             img_url = m_img.group(1)
+            img_url = xml.sax.saxutils.unescape(img_url)
+
             orig_name, img_size = ehentai_get_imginfo(html)
             _, ext = os.path.splitext(orig_name)
 
@@ -283,9 +331,9 @@ def ehentai_download(save_path, page_info):
             else:
                 if "no-filecheck" in flags:
                     if check_file_corrption(img_size, img_path):
-                        print("Caution: File corrption is detected.")
+                        print("Caution: File-size is invalid.")
                         print("Now, attempt to retry download...")
-                        count_stop += 1
+                        count_retry += 1
                         continue
                 save_image(img_url, img_path)
                 print("{0:03d} : {1} ... save".format(count+1, img_url))
@@ -331,10 +379,10 @@ def sequence_download(page_info):
     retry_count = 0
     while not ok:
         if retry_count >= args.retry:
-            #create_report(page_info)
+            create_report(page_info)
             return False
         print("Notice: Retry limit exceeded. Now, Sleep...")
-        print("Sleep time: {0} seconds".format(args.sleep))
+        print("Sleep time: {0} sec".format(args.sleep))
         time.sleep(args.sleep)
         ok = ehentai_download(save_path, page_info)
         retry_count += 1
@@ -349,11 +397,11 @@ if __name__ == '__main__':
     input_urls = []
 
     # file path
-    root_path = ""
-    report_path = "./interrupt-report.json"
-    remain_urls_path = "./remaining-urls.txt"
-    store_path = ["~/Pictures", "~/Picture", "~/ピクチャ", os.getcwd()]
+    report_path = os.path.join(script_path, "interrupt-report.json")
+    remain_urls_path = os.path.join(script_path, "remaining-urls.txt")
 
+    root_path = ""
+    store_path = ["~/Pictures", "~/Picture", "~/ピクチャ", os.getcwd()]
     for i in store_path:
         tmp = os.path.expanduser(i)
         if os.path.exists(tmp):
@@ -369,8 +417,10 @@ if __name__ == '__main__':
         help="Read URLs of E-Hentai org from text file")
     parser.add_argument("-r", "--retry", type=int, nargs=1, default=3,
         help="Times of retry download (Default: 3 times)")
-    parser.add_argument("-s", "--sleep", type=int, nargs=1, default=1800,
+    parser.add_argument("-s", "--sleep", type=int, nargs=1, default=900,
         help="Sleep time until next retry (Default: 1800 sec)")
+    parser.add_argument("-i", "--interval", type=int, nargs=1,
+        help="Interval between downloads")
     parser.add_argument("--no-resume", dest="noresume", action="store_true",
         default=False, help="Ignore resume of downloads.")
     parser.add_argument("--no-numbering", dest="nonumbering", action="store_true",
@@ -418,7 +468,7 @@ if __name__ == '__main__':
 
     # exit
     if len(input_urls) == 0:
-        print("Error : Input URLs don't exist.")
+        print("Error: Input URLs don't exist.")
         sys.exit(1)
 
     # print input urls
@@ -434,7 +484,9 @@ if __name__ == '__main__':
         f = open(report_path)
         page_info = json.load(f)
         finish = sequence_download(page_info)
-        if not finish:
+        if finish:
+            os.remove(report_path)
+        else:
             print("\nNotice: Download is not finished.")
             print("Next time, remaining images will be downloaded...")
             sys.exit(1)
@@ -466,4 +518,5 @@ if __name__ == '__main__':
             for line in input_urls[i:]:
                 f.write("{0}\n".format(line))
             sys.exit(1)
+
 
