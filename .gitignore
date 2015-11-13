@@ -1,3 +1,6 @@
 __pycache__
-download-list.txt
 E-Hentai_downloads
+download-list.txt
+interrupt-report.json
+*.json~
+*.txt~

@@ -6,13 +6,16 @@ import re
 import sys
 import json
 import time
+import math
+import signal
 import random
 import argparse
 import urllib.request
 import xml.sax.saxutils
 
 # mymodule
-script_path = os.path.basename(__file__)
+script_path = os.path.abspath(__file__)
+root_path = os.path.dirname(script_path)
 sys.path.append(script_path)
 import agent
 
@@ -41,6 +44,9 @@ def save_image(img_url, img_path):
                 localfile.close()
 
             return True
+
+    except KeyboardInterrupt:
+        return False
 
     except:
         time.sleep(1)
@@ -258,7 +264,7 @@ def ehentai_get_nexturl(html):
 
 def create_report(page_info):
     json_data = json.dumps(page_info)
-    f.open(page_info["report_path"], "w")
+    f = open(page_info["report_path"], "w")
     f.write(json_data)
     f.close()
     return
@@ -271,22 +277,26 @@ def ehentai_download(save_path, page_info):
     interval = 0
 
     url        = page_info["top_url"]
-    args       = page_info["args"]
     flags      = page_info["flags"]
     num_images = page_info["num_images"]
 
-    if page_info["tmp_count"] > 0:
-        url   = page_info["tmp_url"]
-        count = page_info["tmp_count"]
-
-    if not args.interval is None:
-        interval = args.interval[0]
+    if len(page_info["gal_urls"]) > 0:
+        page_info["gal_urls"].pop()
+        url   = page_info["gal_urls"][-1]
+        count = len(page_info["gal_urls"])
     else:
-        if num_images <= 50:
-            interval = 1
-        else:
-            interval = 1 + (num_images-50)/200
-            if interval > 5: interval = 5
+        page_info["tmp_url"] = url
+
+    if count == num_images:
+        print("\nSuccess: Finish downloading!\n")
+        time.sleep(1)
+        return True
+
+    if not page_info["interval"] is None:
+        interval = page_info["interval"]
+    else:
+        interval = math.sqrt(num_images*2) / 5
+        if interval > 5: interval = 5
 
     # download operation
     while count < num_images:
@@ -301,6 +311,9 @@ def ehentai_download(save_path, page_info):
         try:
             html = get_html(url)
             time.sleep(interval)
+        except KeyboardInterrupt:
+            create_report(page_info)
+            sys.exit(1)
         except:
             print("Error: HTML document download error.")
             count_retry += 1
@@ -326,16 +339,28 @@ def ehentai_download(save_path, page_info):
                 img_name = "{0:03d}{1}".format(count+1, ext)
 
             img_path = os.path.join(save_path, img_name)
+
+            flag_save = True
             if os.path.exists(img_path):
-                print("{0:03d} : {1} ... already exists".format(count+1, img_url))
-            else:
-                if "no-filecheck" in flags:
-                    if check_file_corrption(img_size, img_path):
-                        print("Caution: File-size is invalid.")
-                        print("Now, attempt to retry download...")
-                        count_retry += 1
-                        continue
-                save_image(img_url, img_path)
+                if not "no-filecheck" in flags and check_file_corruption(img_size, img_path):
+                    print("Caution: File-size is invalid.")
+                    print("Now, attempt to retry download...")
+                else:
+                    print("{0:03d} : {1} ... already exists".format(count+1, img_url))
+                    flag_save = False
+
+            if flag_save:
+                ok = save_image(img_url, img_path)
+                if not ok:
+                    count_retry += 1
+                    continue
+
+                if not "no-filecheck" in flags and check_file_corruption(img_size, img_path):
+                    print("Caution: File-size is invalid.")
+                    print("Now, attempt to retry download...")
+                    count_retry += 1
+                    continue
+
                 print("{0:03d} : {1} ... save".format(count+1, img_url))
 
             count += 1
@@ -343,34 +368,46 @@ def ehentai_download(save_path, page_info):
             if next_url == "":
                 break
 
-            if url == next_url:
+            if url == next_url or count == num_images:
                 print("\nSuccess: Finish downloading!\n")
                 time.sleep(1)
                 return True
             else:
                 url = next_url
-
-    page_info["tmp_url"] = url
-    page_info["tmp_count"] = count
+                page_info["gal_urls"].append(next_url)
 
     return False
 
 
 def sequence_download(page_info):
-    args = page_info["args"]
 
     # make new directory
-    save_path = os.path.join(page_info["root_path"], page_info["title"])
+    save_path = os.path.join(page_info["save_path"], page_info["title"])
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-    else:
-        print("Caution: The directory already exists.")
+
+    # show download options
+    print("<Download Options>")
+    print(flags)
+    print()
+
+    # print input urls
+    print("<List of input URLs>")
+    for url in page_info["remain_urls"]:
+        print(url)
+    print()
 
     # print information
     print("\n< Page Information >")
     print("URL : {0}".format(page_info["top_url"]))
     print("Title : {0}".format(page_info["title"]))
-    print("Total of Images : {0}\n".format(page_info["num_images"]))
+    print("Total of Images : {0}".format(page_info["num_images"]))
+    if len(page_info["gal_urls"]) > 0:
+        print("Downloaded : {0} ({1:.1f}%)".format(
+                len(page_info["gal_urls"]),
+                len(page_info["gal_urls"]) * 100 / page_info["num_images"]
+            ))
+    print()
 
     # download images
     ok = ehentai_download(save_path, page_info)
@@ -378,12 +415,14 @@ def sequence_download(page_info):
     # resume download
     retry_count = 0
     while not ok:
-        if retry_count >= args.retry:
+        if retry_count >= page_info["retry"]:
             create_report(page_info)
             return False
-        print("Notice: Retry limit exceeded. Now, Sleep...")
-        print("Sleep time: {0} sec".format(args.sleep))
-        time.sleep(args.sleep)
+
+        create_report(page_info)
+        print("\nNotice: Retry limit exceeded. Now, Sleep...")
+        print("Sleep time: {0} sec".format(page_info["sleep"]))
+        time.sleep(page_info["sleep"])
         ok = ehentai_download(save_path, page_info)
         retry_count += 1
 
@@ -392,37 +431,43 @@ def sequence_download(page_info):
 
 # main function
 if __name__ == '__main__':
+
     # variables
+    page_info = {}
     flags = []
     input_urls = []
 
     # file path
-    report_path = os.path.join(script_path, "interrupt-report.json")
+    report_path = os.path.join(root_path, "interrupt-report.json")
     remain_urls_path = os.path.join(script_path, "remaining-urls.txt")
 
-    root_path = ""
+    save_path = ""
     store_path = ["~/Pictures", "~/Picture", "~/ピクチャ", os.getcwd()]
     for i in store_path:
         tmp = os.path.expanduser(i)
         if os.path.exists(tmp):
-            root_path = os.path.join(tmp, "E-Hentai_downloads")
+            save_path = os.path.join(tmp, "E-Hentai_downloads")
             break
+
 
     # option parser
     desc_str = "This program for downloading images from E-Hentai org."
     parser = argparse.ArgumentParser(description=desc_str)
     parser.add_argument("-u", "--url", dest="url", nargs="*",
-        help="Read URL of E-Hentai org")
+                        help="Read URL of E-Hentai org")
     parser.add_argument("-f", "--filename", dest="filename", nargs="*",
-        help="Read URLs of E-Hentai org from text file")
-    parser.add_argument("-r", "--retry", type=int, nargs=1, default=3,
-        help="Times of retry download (Default: 3 times)")
-    parser.add_argument("-s", "--sleep", type=int, nargs=1, default=900,
-        help="Sleep time until next retry (Default: 1800 sec)")
-    parser.add_argument("-i", "--interval", type=int, nargs=1,
-        help="Interval between downloads")
-    parser.add_argument("--no-resume", dest="noresume", action="store_true",
-        default=False, help="Ignore resume of downloads.")
+                        help="Read URLs of E-Hentai org from text file")
+    parser.add_argument("--retry", type=int, nargs=1,
+                        metavar="TIMES", default=3,
+                        help="Times of retry download (Default: 3 times)")
+    parser.add_argument("--sleep", type=int, nargs=1,
+                        metavar="SECONDS", default=900,
+                        help="Sleep time until next retry (Default: 1800 sec)")
+    parser.add_argument("--interval", type=int, nargs=1,
+                        metavar="SECONDS", help="Interval between downloads")
+    parser.add_argument("--no-resume", dest="noresume",
+                        action="store_true", default=False,
+                        help="Ignore resume of downloads.")
     parser.add_argument("--no-numbering", dest="nonumbering", action="store_true",
         default=False, help="Download image without file-name numbering")
     parser.add_argument("--no-filecheck", dest="nofilecheck", action="store_true",
@@ -437,86 +482,88 @@ if __name__ == '__main__':
     if args.nofilecheck:
         flags.append("no-filecheck")
 
+
     # get input urls
     print("[ E-Hentai Downloader ]")
-    argc = len(sys.argv)
-    if argc == 1:
-        input_str = ""
-        while not re.match("[0-9a-zA-Z]+", input_str):
-            print("Please input URL of E-Hentai Page.")
-            input_str = input("URL > ")
-            input_str.strip()
-        print()
-        input_urls += get_input_urls(input_str, flag_urlonly=True)
-    else:
-        if not args.url is None:
-            for i in args.url:
-                input_urls += get_input_urls(i, flag_urlonly=True)
-        if not args.filename is None:
-            for i in args.filename:
-                input_urls += get_input_urls(i, flag_urlonly=False)
-        if input_urls == []:
-            parser.print_help()
+
+    if "no-resume" in flags or not os.path.exists(report_path):
+        try:
+            argc = len(sys.argv)
+            if argc == 1:
+                input_str = ""
+                while not re.match("[0-9a-zA-Z]+", input_str):
+                    print("Please input URL of E-Hentai Page.")
+                    input_str = input("URL > ")
+                    input_str.strip()
+                print()
+                input_urls += get_input_urls(input_str, flag_urlonly=True)
+            else:
+                if not args.url is None:
+                    for i in args.url:
+                        input_urls += get_input_urls(i, flag_urlonly=True)
+                if not args.filename is None:
+                    for i in args.filename:
+                        input_urls += get_input_urls(i, flag_urlonly=False)
+                if input_urls == []:
+                    parser.print_help()
+                    sys.exit(1)
+
+            # exit
+            if len(input_urls) == 0:
+                print("Error: Input URLs don't exist.")
+                sys.exit(1)
+
+        except KeyboardInterrupt:
+            print("\nNotice: You press Ctrl+C, and now quit...")
             sys.exit(1)
 
-    # show download options
-    print("Now, Start downloading...\n")
-    if flags != []:
-        print("<Download Options>")
-        print(flags)
-        print()
-
-    # exit
-    if len(input_urls) == 0:
-        print("Error: Input URLs don't exist.")
-        sys.exit(1)
-
-    # print input urls
-    print("<List of input URL>")
-    for url in input_urls:
-        print(url)
-    print()
 
     # resume interrupted download
     if not "no-resume" in flags and os.path.exists(report_path):
-        print("Notice: Interrupted download will be resumed.")
-        print("URL : {0}".format(data["url"]))
+        print("\nNotice: Interrupted download will be resumed.\n")
         f = open(report_path)
         page_info = json.load(f)
-        finish = sequence_download(page_info)
-        if finish:
-            os.remove(report_path)
-        else:
-            print("\nNotice: Download is not finished.")
-            print("Next time, remaining images will be downloaded...")
-            sys.exit(1)
+        input_urls = page_info["remain_urls"]
+        os.remove(report_path)
 
-    # download images
-    for i, url in enumerate(input_urls):
-        top_url     = ehentai_get_topurl(url)
-        g_url       = ehentai_get_gurl(url)
-        title       = ehentai_get_title(g_url)
-        num_images  = ehentai_get_numimgs(top_url)
-
-        page_info = {
-            "root_path"  : root_path,
-            "report_path": report_path,
-            "top_url"    : top_url,
-            "g_url"      : g_url,
-            "title"      : title,
-            "num_images" : num_images,
-            "args"       : args,
-            "flags"      : flags,
-            "tmp_url"    : "",
-            "tmp_count"  : 0
-        }
         finish = sequence_download(page_info)
         if not finish:
             print("\nNotice: Download is not finished.")
             print("Next time, remaining images will be downloaded...")
-            f = open(remain_urls_path, "w")
-            for line in input_urls[i:]:
-                f.write("{0}\n".format(line))
             sys.exit(1)
+
+
+    # start message
+    if len(input_urls) > 0:
+        print("Now, Start downloading...\n\n")
+
+    # download images
+    while len(input_urls) > 0:
+        url = input_urls.pop(0)
+
+        top_url    = ehentai_get_topurl(url)
+        first_url  = ehentai_get_gurl(url)
+        title      = ehentai_get_title(first_url)
+        num_images = ehentai_get_numimgs(top_url)
+
+        interval = None
+        if not args.interval is None:
+            interval = args.interval[0]
+
+        page_info = {
+            "save_path"   : save_path,
+            "report_path" : report_path,
+            "top_url"     : top_url,
+            "title"       : title,
+            "num_images"  : num_images,
+            "retry"       : args.retry,
+            "sleep"       : args.sleep,
+            "interval"    : interval,
+            "flags"       : flags,
+            "gal_urls"    : [],
+            "remain_urls" : input_urls
+        }
+
+        sequence_download(page_info)
 
 
