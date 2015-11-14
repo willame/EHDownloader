@@ -130,10 +130,30 @@ def ehentai_get_topurl(url):
 
 def ehentai_get_title(top_url):
     html = ""
-    entities = {
-        "&#039;": "'",
-        "&quot;": '"'
-    }
+    entites = {}
+    
+    # for file-name in windows
+    if sys.platform == "win32":
+        entities = {
+            "&#039;": "’",
+            "&quot;": "”",
+            "?"     : "？",
+            "&yen;" : "￥",
+            "*"     : "＊",
+            ";"     : "；",
+            "&lt;"  : "＜",
+            "&gt;"  : "＞",
+            "|"     : "｜",
+            "&amp;" : "&"
+        }
+    else:
+        entities = {
+            "&#039;": "'",
+            "&quot;": '"',
+            "&lt;"  : "<",
+            "&gt;"  : ">",
+            "&amp;" : "&"
+        }
 
     try:
         for _ in range(5):
@@ -157,7 +177,7 @@ def ehentai_get_title(top_url):
         title = xml.sax.saxutils.unescape(tmp, entities)
         return title
 
-    m3 = re.serach("<title>(.+?)</title>", html)
+    m3 = re.search("<title>(.+?)</title>", html)
     if not m3 is None:
         tmp = m3.group(1)
         title = xml.sax.saxutils.unescape(tmp, entities)
@@ -222,7 +242,7 @@ def get_input_urls(input_str, flag_urlonly=False):
             print("Please input url starts with \"http://\".")
             sys.exit(1)
 
-        print("Error: URL is invalid.\n")
+        print("Error: URL is invalid.")
         sys.exit(1)
     else:
         urls = []
@@ -300,10 +320,12 @@ def ehentai_download(save_path, page_info):
     while count < num_images:
 
         # count of retry
-        if count_retry < 10:
-            count_retry = 0
-        else:
+        if count_retry > 10:
             break
+            
+        # save state
+        if not "no-backup" in flags and count % 10 == 0:
+            create_report(page_info)
 
         # get html
         try:
@@ -362,6 +384,7 @@ def ehentai_download(save_path, page_info):
                 print("{0:03d} : {1} ... save".format(count+1, img_url))
 
             count += 1
+            count_retry = 0
             next_url = ehentai_get_nexturl(html)
             if next_url == "":
                 break
@@ -427,6 +450,25 @@ def sequence_download(page_info):
     return True
 
 
+# first input
+def prompt_url_input():
+    input_str = ""
+    try:
+        while not re.match("https?://.+", input_str):
+            print("Please input URL of E-Hentai Page.")
+            input_str = input("URL > ")
+            input_str.strip()
+        print()
+    except KeyboardInterrupt:
+        print("\nNotice: You press Ctrl+C, and now quit...")
+        sys.exit(1)
+    except:
+        print("\nNotice: Exception is detected.")
+        sys.exit(1)
+    
+    return input_str
+
+
 # main function
 if __name__ == '__main__':
 
@@ -434,6 +476,8 @@ if __name__ == '__main__':
     page_info = {}
     flags = []
     input_urls = []
+    flag_resume = False
+    flag_recursive = False
 
     # file path
     report_path = os.path.join(root_path, "interrupt-report.json")
@@ -470,6 +514,8 @@ if __name__ == '__main__':
         default=False, help="Download image without file-name numbering")
     parser.add_argument("--no-filecheck", dest="nofilecheck", action="store_true",
         default=False, help="Download image without file-corruption check")
+    parser.add_argument("--no-backup", dest="nobackup", action="store_true",
+        default=False, help="Download image without backup JSON file")
     args = parser.parse_args()
 
     # flags
@@ -479,42 +525,27 @@ if __name__ == '__main__':
         flags.append("no-numbering")
     if args.nofilecheck:
         flags.append("no-filecheck")
+    if args.nobackup:
+        flags.append("no-backup")
 
 
     # get input urls
     print("[ E-Hentai Downloader ]")
 
     if "no-resume" in flags or not os.path.exists(report_path):
-        try:
-            argc = len(sys.argv)
-            if argc == 1:
-                input_str = ""
-                while not re.match("[0-9a-zA-Z]+", input_str):
-                    print("Please input URL of E-Hentai Page.")
-                    input_str = input("URL > ")
-                    input_str.strip()
-                print()
-                input_urls += get_input_urls(input_str, flag_urlonly=True)
-            else:
-                if not args.url is None:
-                    for i in args.url:
-                        input_urls += get_input_urls(i, flag_urlonly=True)
-                if not args.filename is None:
-                    for i in args.filename:
-                        input_urls += get_input_urls(i, flag_urlonly=False)
-                if input_urls == []:
-                    parser.print_help()
-                    sys.exit(1)
-
-            # exit
-            if len(input_urls) == 0:
-                print("Error: Input URLs don't exist.")
-                sys.exit(1)
-
-        except KeyboardInterrupt:
-            print("\nNotice: You press Ctrl+C, and now quit...")
+        if not args.url is None:
+            for i in args.url:
+                input_urls += get_input_urls(i, flag_urlonly=True)
+        if not args.filename is None:
+            for i in args.filename:
+                input_urls += get_input_urls(i, flag_urlonly=False)
+        if len(input_urls) == 0:
+            flag_recursive = True
+            input_str = prompt_url_input()
+            input_urls += get_input_urls(input_str, flag_urlonly=True)
+        if len(input_urls) == 0:
+            print("Error: Input URLs don't exist.")
             sys.exit(1)
-
 
     # resume interrupted download
     if not "no-resume" in flags and os.path.exists(report_path):
@@ -522,8 +553,9 @@ if __name__ == '__main__':
         f = open(report_path)
         page_info = json.load(f)
         input_urls = page_info["remain_urls"]
-        os.remove(report_path)
+        f.close()
 
+        flag_resume = True
         finish = sequence_download(page_info)
         if not finish:
             print("\nNotice: Download is not finished.")
@@ -532,17 +564,35 @@ if __name__ == '__main__':
 
 
     # start message
-    if len(input_urls) > 0:
+    if not flag_resume:
         print("Now, Start downloading...\n")
 
     # download images
-    while len(input_urls) > 0:
-        url = input_urls.pop(0)
+    while True:
+        url = ""
+        
+        # get url
+        if len(input_urls) == 0 and flag_recursive:
+            input_str = prompt_url_input()
+            input_urls += get_input_urls(input_str, flag_urlonly=True)
+            print("Now, Start downloading...\n")
+        
+        # check whether finish or not
+        if len(input_urls) > 0:
+            url = input_urls.pop(0)
+        else:
+            break
 
+        # variables
         top_url    = ehentai_get_topurl(url)
         first_url  = ehentai_get_gurl(url)
         title      = ehentai_get_title(first_url)
         num_images = ehentai_get_numimgs(top_url)
+        
+        if num_images == 0 or first_url == "":
+            print("Notice: This URL is probably wrong.")
+            print()
+            continue
 
         interval = None
         if not args.interval is None:
@@ -564,4 +614,4 @@ if __name__ == '__main__':
 
         sequence_download(page_info)
 
-
+    os.remove(report_path)
