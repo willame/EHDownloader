@@ -2,5 +2,7 @@ __pycache__
 E-Hentai_downloads
 download-list.txt
 interrupt-report.json
+build
+src/build
 *.json~
 *.txt~

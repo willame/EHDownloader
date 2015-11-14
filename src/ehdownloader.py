@@ -14,7 +14,8 @@ import urllib.request
 import xml.sax.saxutils
 
 # mymodule
-script_path = os.path.abspath(__file__)
+script_path = os.path.realpath('__file__')
+script_path = os.path.abspath(script_path)
 root_path = os.path.dirname(script_path)
 sys.path.append(script_path)
 import agent
@@ -281,11 +282,8 @@ def ehentai_download(save_path, page_info):
     num_images = page_info["num_images"]
 
     if len(page_info["gal_urls"]) > 0:
-        page_info["gal_urls"].pop()
         url   = page_info["gal_urls"][-1]
         count = len(page_info["gal_urls"])
-    else:
-        page_info["tmp_url"] = url
 
     if count == num_images:
         print("\nSuccess: Finish downloading!\n")
@@ -387,12 +385,12 @@ def sequence_download(page_info):
         os.makedirs(save_path)
 
     # show download options
-    print("<Download Options>")
+    print("< Download Options >")
     print(flags)
     print()
 
     # print input urls
-    print("<List of input URLs>")
+    print("< List of Remaining URLs >")
     for url in page_info["remain_urls"]:
         print(url)
     print()
@@ -535,7 +533,7 @@ if __name__ == '__main__':
 
     # start message
     if len(input_urls) > 0:
-        print("Now, Start downloading...\n\n")
+        print("Now, Start downloading...\n")
 
     # download images
     while len(input_urls) > 0:
