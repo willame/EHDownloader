@@ -14,7 +14,10 @@ import urllib.request
 import xml.sax.saxutils
 
 # mymodule
-script_path = os.path.realpath('__file__')
+try:
+    script_path = os.path.realpath(__file__)
+except:
+    script_path = os.path.realpath(sys.argv[0])
 script_path = os.path.abspath(script_path)
 root_path = os.path.dirname(script_path)
 sys.path.append(script_path)
@@ -481,8 +484,7 @@ if __name__ == '__main__':
 
     # file path
     report_path = os.path.join(root_path, "interrupt-report.json")
-    remain_urls_path = os.path.join(script_path, "remaining-urls.txt")
-
+    
     save_path = ""
     store_path = ["~/Pictures", "~/Picture", "~/ピクチャ", os.getcwd()]
     for i in store_path:
@@ -573,6 +575,7 @@ if __name__ == '__main__':
         
         # get url
         if len(input_urls) == 0 and flag_recursive:
+            os.remove(report_path)
             input_str = prompt_url_input()
             input_urls += get_input_urls(input_str, flag_urlonly=True)
             print("Now, Start downloading...\n")
@@ -590,8 +593,7 @@ if __name__ == '__main__':
         num_images = ehentai_get_numimgs(top_url)
         
         if num_images == 0 or first_url == "":
-            print("Notice: This URL is probably wrong.")
-            print()
+            print("Notice: This URL is probably wrong.\n")
             continue
 
         interval = None

@@ -1,3 +1,5 @@
+build/exe.win32-3.4/interrupt-report.json
+build/exe.linux-3.4/interrupt-report.json
 src/build
 src/__pycache__
 E-Hentai_downloads
