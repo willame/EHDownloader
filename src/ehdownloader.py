@@ -10,6 +10,7 @@ import math
 import signal
 import random
 import argparse
+import urllib.parse
 import urllib.request
 import xml.sax.saxutils
 
@@ -25,6 +26,12 @@ import agent
 
 # global variables
 user_agent = random.choice(agent.agent_list)
+
+
+# exception
+class ContentWarningException (Exception):
+    def __str__ (self):
+        return("Content Warning Exception\n")
 
 
 # functions
@@ -60,7 +67,7 @@ def save_image(img_url, img_path):
     return False
 
 
-def get_html(url):
+def get_html(url, warn_check=False):
     global user_agent
     page_html = ""
 
@@ -76,20 +83,15 @@ def get_html(url):
         for line in page.readlines():
             page_html += line.decode('utf-8')
 
+    if warn_check:
+        m = re.search("<h1>Content Warning</h1>", page_html)
+        if not m is None:
+            raise ContentWarningException
+
     return page_html
 
 
-def ehentai_get_gurl(url):
-    html = ""
-
-    try:
-        for _ in range(5):
-            html = get_html(url)
-            break
-    except:
-        time.sleep(1)
-        pass
-
+def ehentai_get_gurl(html):
     m1 = re.search("http://g.e-hentai.org/g/.*", url)
     if not m1 is None:
         return url
@@ -103,17 +105,7 @@ def ehentai_get_gurl(url):
     return ""
 
 
-def ehentai_get_topurl(url):
-    html = ""
-
-    try:
-        for _ in range(5):
-            html = get_html(url)
-            break
-    except:
-        time.sleep(1)
-        pass
-
+def ehentai_get_topurl(html):
     m1 = re.search("http://g.e-hentai.org/g/.*", url)
     if not m1 is None:
         pat1 = "<div style=\".*?\"><a href=\"(.*)?\"><img alt=\"0*1\""
@@ -131,10 +123,9 @@ def ehentai_get_topurl(url):
     return ""
 
 
-def ehentai_get_title(top_url):
-    html = ""
+def ehentai_get_title(html):
     entites = {}
-    
+
     # for file-name in windows
     if sys.platform == "win32":
         entities = {
@@ -158,16 +149,6 @@ def ehentai_get_title(top_url):
             "&amp;" : "&"
         }
 
-    try:
-        for _ in range(5):
-            html = get_html(top_url)
-            break
-    except:
-        time.sleep(1)
-        pass
-
-    #print(html)
-
     m1 = re.search("<h1 id=\"gj\">(.+?)</h1>", html)
     if not m1 is None:
         tmp = m1.group(1)
@@ -189,18 +170,8 @@ def ehentai_get_title(top_url):
     return "Unknown"
 
 
-def ehentai_get_numimgs(top_url):
+def ehentai_get_numimgs(html):
     num = 0
-    html = ""
-
-    try:
-        for _ in range(5):
-            html = get_html(top_url)
-            break
-    except:
-        time.sleep(1)
-        pass
-
     pat = "<div><span>1</span> / <span>(.*?)</span></div>"
     m = re.search(pat, html)
     if not m is None:
@@ -295,7 +266,6 @@ def create_report(page_info):
 
 
 def ehentai_download(save_path, page_info):
-    # variables
     count = 0
     count_retry = 0
     interval = 0
@@ -325,7 +295,7 @@ def ehentai_download(save_path, page_info):
         # count of retry
         if count_retry > 10:
             break
-            
+
         # save state
         if not "no-backup" in flags and count % 10 == 0:
             create_report(page_info)
@@ -335,6 +305,7 @@ def ehentai_download(save_path, page_info):
             html = get_html(url)
             time.sleep(interval)
         except KeyboardInterrupt:
+            print("\nNotice: You press Ctrl+C, and now quit...")
             create_report(page_info)
             sys.exit(1)
         except:
@@ -404,7 +375,6 @@ def ehentai_download(save_path, page_info):
 
 
 def sequence_download(page_info):
-
     # make new directory
     save_path = os.path.join(page_info["save_path"], page_info["title"])
     if not os.path.exists(save_path):
@@ -468,7 +438,7 @@ def prompt_url_input():
     except:
         print("\nNotice: Exception is detected.")
         sys.exit(1)
-    
+
     return input_str
 
 
@@ -481,10 +451,12 @@ if __name__ == '__main__':
     input_urls = []
     flag_resume = False
     flag_recursive = False
+    flag_useflask = False
+
 
     # file path
     report_path = os.path.join(root_path, "interrupt-report.json")
-    
+
     save_path = ""
     store_path = ["~/Pictures", "~/Picture", "~/ピクチャ", os.getcwd()]
     for i in store_path:
@@ -519,6 +491,7 @@ if __name__ == '__main__':
     parser.add_argument("--no-backup", dest="nobackup", action="store_true",
         default=False, help="Download image without backup JSON file")
     args = parser.parse_args()
+
 
     # flags
     if args.noresume:
@@ -565,35 +538,74 @@ if __name__ == '__main__':
             sys.exit(1)
 
 
-    # start message
+    # show start message
     if not flag_resume:
         print("Now, Start downloading...\n")
 
     # download images
-    while True:
+    while not flag_useflask:
         url = ""
-        
+
         # get url
         if len(input_urls) == 0 and flag_recursive:
-            os.remove(report_path)
+            if os.path.exists(report_path):
+                os.remove(report_path)
             input_str = prompt_url_input()
             input_urls += get_input_urls(input_str, flag_urlonly=True)
             print("Now, Start downloading...\n")
-        
+
         # check whether finish or not
         if len(input_urls) > 0:
             url = input_urls.pop(0)
         else:
             break
 
-        # variables
-        top_url    = ehentai_get_topurl(url)
-        first_url  = ehentai_get_gurl(url)
-        title      = ehentai_get_title(first_url)
-        num_images = ehentai_get_numimgs(top_url)
-        
-        if num_images == 0 or first_url == "":
-            print("Notice: This URL is probably wrong.\n")
+        # remove query from url
+        r = urllib.parse.urlsplit(url)
+        url = "{0}://{1}{2}".format(r.scheme, r.netloc, r.path)
+
+        # get variables
+        top_html  = ""
+        gal_html  = ""
+        init_html = ""
+
+        try:
+            for _ in range(5):
+                init_html = get_html(url, True)
+                break
+        except ContentWarningException:
+            print("Notice: 'Content Warning' is occured.\n")
+            print("Skip and go to next URL...\n")
+            continue
+        except:
+            time.sleep(1)
+            pass
+
+        top_url = ehentai_get_topurl(init_html)
+        gal_url = ehentai_get_gurl(init_html)
+
+        try:
+            for _ in range(5):
+                top_html = get_html(top_url, True)
+                break
+        except:
+            time.sleep(1)
+            pass
+
+        try:
+            for _ in range(5):
+                gal_html = get_html(gal_url, True)
+                break
+        except:
+            time.sleep(1)
+            pass
+
+        title      = ehentai_get_title(gal_html)
+        num_images = ehentai_get_numimgs(top_html)
+
+        # url check
+        if num_images == 0 or top_url == "":
+            print("Notice: The URL is probably wrong.\n")
             continue
 
         interval = None
@@ -617,3 +629,5 @@ if __name__ == '__main__':
         sequence_download(page_info)
 
     os.remove(report_path)
+
+
