@@ -48,23 +48,23 @@ def save_image(img_url, img_path):
                 }
             )
 
-            with urllib.request.urlopen(req) as img:
-                localfile = open(img_path, 'wb')
-                localfile.write(img.read())
-                img.close()
-                localfile.close()
+            img = urllib.request.urlopen(req)
 
-            return True
+            localfile = open(img_path, 'wb')
+            localfile.write(img.read())
+            img.close()
+            localfile.close()
+
+            return img.status
 
     except KeyboardInterrupt:
-        return False
+        return None
 
-    except:
-        time.sleep(1)
-        pass
+    except urllib.request.HTTPError:
+        return 404
 
     print("Error: Image download error.")
-    return False
+    return None
 
 
 def get_html(url, warn_check=False):
@@ -79,9 +79,10 @@ def get_html(url, warn_check=False):
         }
     )
 
-    with urllib.request.urlopen(req) as page:
-        for line in page.readlines():
-            page_html += line.decode('utf-8')
+    page = urllib.request.urlopen(req)
+
+    for line in page.readlines():
+        page_html += line.decode('utf-8')
 
     if warn_check:
         m = re.search("<h1>Content Warning</h1>", page_html)
@@ -241,7 +242,7 @@ def get_input_urls(input_str, flag_urlonly=False):
 
 def check_file_corruption(img_size, img_path):
     diff_size = abs(img_size - os.path.getsize(img_path))
-    if diff_size < 0.001 * img_size:
+    if diff_size < 0.01 * img_size:
         return False
     else:
         return True
@@ -304,14 +305,21 @@ def ehentai_download(save_path, page_info):
         try:
             html = get_html(url)
             time.sleep(interval)
-        except KeyboardInterrupt:
-            print("\nNotice: You press Ctrl+C, and now quit...")
-            create_report(page_info)
-            sys.exit(1)
-        except:
+        except urllib.request.HTTPError:
             print("Error: HTML document download error.")
+            time.sleep(1)
             count_retry += 1
             continue
+        except urllib.request.URLError:
+            print("\nNotice: Check network connection.")
+            if not "no-backup" in flags:
+                create_report(page_info)
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print("\nNotice: You press Ctrl+C, and now quit...")
+            if not "no-backup" in flags:
+                create_report(page_info)
+            sys.exit(1)
 
         if html == "":
             count_retry += 1
@@ -344,18 +352,23 @@ def ehentai_download(save_path, page_info):
                     flag_save = False
 
             if flag_save:
-                ok = save_image(img_url, img_path)
-                if not ok:
+                status_code = save_image(img_url, img_path)
+
+                if status_code is None:
                     count_retry += 1
                     continue
 
-                if not "no-filecheck" in flags and check_file_corruption(img_size, img_path):
-                    print("Caution: File-size is invalid.")
-                    print("Now, attempt to retry download...")
-                    count_retry += 1
-                    continue
+                if status_code == 404:
+                    print("{0:03d} : {1} ... not found".format(count+1, img_url))
+                else:
+                    if not "no-filecheck" in flags and check_file_corruption(img_size, img_path):
+                        print("Caution: File-size is invalid.")
+                        print("Now, attempt to retry download...")
+                        count_retry += 1
+                        continue
 
-                print("{0:03d} : {1} ... save".format(count+1, img_url))
+                    print("{0:03d} : {1} ... save".format(count+1, img_url))
+
 
             count += 1
             count_retry = 0
@@ -382,7 +395,7 @@ def sequence_download(page_info):
 
     # show download options
     print("< Download Options >")
-    print(flags)
+    print(page_info["flags"])
     print()
 
     # print input urls
@@ -410,10 +423,13 @@ def sequence_download(page_info):
     retry_count = 0
     while not ok:
         if retry_count >= page_info["retry"]:
-            create_report(page_info)
+            if not "no-backup" in page_info["flags"]:
+                create_report(page_info)
             return False
 
-        create_report(page_info)
+        if not "no-backup" in page_info["flags"]:
+            create_report(page_info)
+
         print("\nNotice: Retry limit exceeded. Now, Sleep...")
         print("Sleep time: {0} sec".format(page_info["sleep"]))
         time.sleep(page_info["sleep"])
@@ -569,36 +585,46 @@ if __name__ == '__main__':
         gal_html  = ""
         init_html = ""
 
-        try:
-            for _ in range(5):
+
+        for _ in range(5):
+            try:
                 init_html = get_html(url, True)
                 break
-        except ContentWarningException:
-            print("Notice: 'Content Warning' is occured.\n")
-            print("Skip and go to next URL...\n")
-            continue
-        except:
-            time.sleep(1)
-            pass
+            except urllib.request.HTTPError:
+                time.sleep(1)
+                continue
+            except urllib.request.URLError:
+                print("\nNotice: Check network connection.")
+                sys.exit(1)
+            except ContentWarningException:
+                print("Notice: 'Content Warning' is occured.\n")
+                print("Skip and go to next URL...\n")
+                pass
 
         top_url = ehentai_get_topurl(init_html)
         gal_url = ehentai_get_gurl(init_html)
 
-        try:
-            for _ in range(5):
-                top_html = get_html(top_url, True)
+        for _ in range(5):
+            try:
+                top_html = get_html(top_url)
                 break
-        except:
-            time.sleep(1)
-            pass
+            except urllib.request.HTTPError:
+                time.sleep(1)
+                continue
+            except urllib.request.URLError:
+                print("\nNotice: Check network connection.")
+                sys.exit(1)
 
-        try:
-            for _ in range(5):
-                gal_html = get_html(gal_url, True)
+        for _ in range(5):
+            try:
+                gal_html = get_html(gal_url)
                 break
-        except:
-            time.sleep(1)
-            pass
+            except urllib.request.HTTPError:
+                time.sleep(1)
+                continue
+            except urllib.request.URLError:
+                print("\nNotice: Check network connection.")
+                sys.exit(1)
 
         title      = ehentai_get_title(gal_html)
         num_images = ehentai_get_numimgs(top_html)
