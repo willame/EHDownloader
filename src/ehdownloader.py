@@ -295,10 +295,12 @@ def ehentai_download(save_path, page_info):
 
         # count of retry
         if count_retry > 10:
+            if not "no-backup" in flags:
+                create_report(page_info)
             break
 
         # save state
-        if not "no-backup" in flags and count % 10 == 0:
+        if not "no-backup" in flags and count % 5 == 0:
             create_report(page_info)
 
         # get html
@@ -306,10 +308,15 @@ def ehentai_download(save_path, page_info):
             html = get_html(url)
             time.sleep(interval)
         except urllib.request.HTTPError:
-            print("Error: HTML document download error.")
+            print("Error: HTML error.")
             time.sleep(1)
             count_retry += 1
             continue
+        except urllib.error.URLError:
+            print("\nNotice: HTTP Timeout.")
+            time.sleep(1)
+            count_retry += 1
+            continue  
         except urllib.request.URLError:
             print("\nNotice: Check network connection.")
             if not "no-backup" in flags:
